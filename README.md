@@ -44,7 +44,7 @@ nginx как front-end к apache!
 
 Вводим `ip a` и убеждаемся, что на интерфейсе адаптера *сетевой мост* есть айпишник (будет начинаться на 192.168.1.*, если с домашнего роутер).
 Создаем .yml
-`sudo /etc/netplan/99_config.yaml`
+`sudo nano /etc/netplan/99_config.yaml`
 и вводим 
 ```
 network:
@@ -54,25 +54,24 @@ network:
     <интерфейс сетевого моста>:
       dhcp4: true
     <интерфейс внутренней сети>:
-      addresses:
-        - <желаемый ip-адрес>/<маска>
+      addresses: [<желаемый ip-адрес>/<маска>]
 ```
-Применяем настройки `sudo netplan apply`
+Применяем настройки `sudo netplan apply` и смотрим, что интерфейсы обновились `ip a`.
 
 Теперь заходим под root и настраиваем форвардинг
-`sudo echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf`
+`echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf`
 и включаем его 
-`sudo sysctl -p`.
+`sysctl -p`.
 Настраиваем NAT
-`sudo iptables -t nat -A POSTROUTING -o <интерфейс сетевого моста> -j MASQUERADE`.
+`iptables -t nat -A POSTROUTING -o <интерфейс сетевого моста> -j MASQUERADE`.
 Сохраняем правила iptables
-`sudo apt-get install iptables-persistent`
-`sudo netfilter-persistent save`.
+`apt-get install iptables-persistent`
+`netfilter-persistent save`.
 
 Заходим на вторую ВМ
 
 Создаем .yml
-`sudo /etc/netplan/99_config.yaml`
+`sudo nano /etc/netplan/99_config.yaml`
 и вводим 
 ```
 network:
@@ -87,7 +86,7 @@ network:
 
 ```
 
-Применяем настройки `sudo netplan apply`.
+Применяем настройки `sudo netplan apply` и смотрим, что интерфейсы обновились `ip a`
 Проверяем что все работает `ping 8.8.8.8` и проверяем apt `sudo apt update`
 (Если не работает, то сделать `echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf`
 )
@@ -96,11 +95,13 @@ network:
 ## Задание 2.
 
 Заходим на первую ВМ
+
 Скачиваем nginx `sudo apt install nginx`.
 Меняем в */etc/nginx/sites-available/default* в **location / {}** `try_files $uri $uri/ =404;` на `proxy_pass http://<ip-адрес второй ВМ>;` для переадресации.
 Перезапускаем nginx `sudo systemctl restart nginx`
 
 Заходим на вторую ВМ
+
 Скачиваем apache `sudo apt install apache2`
 
 На хостовой такче в браузере заходим по адресу первой ВМ (тот что по сетевому мосту выдается) и там должна быть страница apache
@@ -110,7 +111,7 @@ network:
 Заходим на первую ВМ
 
 Перенаправляем входящие подключения
-`sudo iptables -t nat -A PREROUTING -p tcp --dport 2222 -j DNAT --to-destination <ip-адрес второй ВМ>.:22`.
+`sudo iptables -t nat -A PREROUTING -p tcp --dport 2222 -j DNAT --to-destination <ip-адрес второй ВМ>:22`.
 Разрешаем форвардинг пакетов
 `sudo iptables -A FORWARD -p tcp -d <ip-адрес второй ВМ> --dport 22 -j ACCEPT`
 
@@ -121,6 +122,6 @@ network:
 и проверяем что он работает
 `sudo systemctl status ssh`
 
-С хостовой ОС подлюкаемся по ssh к первой ВМ по сетевому мосту
+С хостовой ОС подключаемся по ssh к первой ВМ по сетевому мосту
 `ssh <username>@<ip-адрес> -p 2222`
 
