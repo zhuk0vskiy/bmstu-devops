@@ -40,25 +40,58 @@ nginx как front-end к apache!
 
 Создаем две виртуалки. На одной делаем сетевые адаптеры *сетевой мост* и *внутренняя сеть*, на второй *внутренняя сеть*
 
-За ходим на первую ВМ.
-Вводим `ip a` и убеждаемся, что на интерфейсе адаптера *сетевой мост* есть айпишник (будет начинаться на 192.168.1.*).
-Назначаем айпишник для интерфейса внутренней сети
-`sudo ip addr add <ip-адрес>/<маска сети> dev <интерфейс внутренней сети>`
-Теперь заходим под root
-`sudo echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf` и включаем ip форвардинг 
-`sudo sysctl -p`
-и настраиваем NAT
-`sudo iptables -t nat -A POSTROUTING -o <интерфейс сетевого моста> -j MASQUERADE`
+За ходим на первую ВМ
+
+Вводим `ip a` и убеждаемся, что на интерфейсе адаптера *сетевой мост* есть айпишник (будет начинаться на 192.168.1.*, если с домашнего роутер).
+Создаем .yml
+`sudo /etc/netplan/99_config.yaml`
+и вводим 
+```
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    <интерфейс сетевого моста>:
+      dhcp4: true
+    <интерфейс внутренней сети>:
+      addresses:
+        - <желаемый ip-адрес>/<маска>
+```
+Применяем настройки `sudo netplan apply`
+
+Теперь заходим под root и настраиваем форвардинг
+`sudo echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf`
+и включаем его 
+`sudo sysctl -p`.
+Настраиваем NAT
+`sudo iptables -t nat -A POSTROUTING -o <интерфейс сетевого моста> -j MASQUERADE`.
 Сохраняем правила iptables
 `sudo apt-get install iptables-persistent`
-`sudo netfilter-persistent save`
+`sudo netfilter-persistent save`.
 
 Заходим на вторую ВМ
-Назначаем айпишник для интерфейса внутренней сети
-`sudo ip addr add <ip-адрес>/<маска сети> dev <интерфейс внутренней сети>` и gateway `sudo ip route add default via <ip-адрес первом ВМ>`. 
-Добавляем днс, чтоб apt смог скачивать пакеты `echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf`
 
+Создаем .yml
+`sudo /etc/netplan/99_config.yaml`
+и вводим 
+```
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    <интерфейс внутренней сети>:
+      addresses: [<желаемый ip-адрес>/<маска>]
+      gateway4: <ip-адрес первой ВМ>
+      nameservers:
+        addresses: [8.8.8.8]
+
+```
+
+Применяем настройки `sudo netplan apply`.
 Проверяем что все работает `ping 8.8.8.8` и проверяем apt `sudo apt update`
+(Если не работает, то сделать `echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf`
+)
+
 
 ## Задание 2.
 
@@ -75,17 +108,19 @@ nginx как front-end к apache!
 ## Задание 3.
 
 Заходим на первую ВМ
+
 Перенаправляем входящие подключения
 `sudo iptables -t nat -A PREROUTING -p tcp --dport 2222 -j DNAT --to-destination <ip-адрес второй ВМ>.:22`.
 Разрешаем форвардинг пакетов
 `sudo iptables -A FORWARD -p tcp -d <ip-адрес второй ВМ> --dport 22 -j ACCEPT`
 
 Заходим на вторую ВМ
+
 Скачиваем ssh сервер
 `sudo apt install ssh`
 и проверяем что он работает
 `sudo systemctl status ssh`
 
-С хостовой ОС подлюкаемся по ssh к первой ВМ по сетевому мостц
+С хостовой ОС подлюкаемся по ssh к первой ВМ по сетевому мосту
 `ssh <username>@<ip-адрес> -p 2222`
 
