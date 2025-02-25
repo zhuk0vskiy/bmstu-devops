@@ -112,8 +112,13 @@ network:
 
 Перенаправляем входящие подключения
 `sudo iptables -t nat -A PREROUTING -p tcp --dport 2222 -j DNAT --to-destination <ip-адрес второй ВМ>:22`.
-Разрешаем форвардинг пакетов
-`sudo iptables -A FORWARD -p tcp -d <ip-адрес второй ВМ> --dport 22 -j ACCEPT`
+<!-- Разрешаем форвардинг пакетов
+`sudo iptables -A FORWARD -p tcp -d <ip-адрес второй ВМ> --dport 22 -j ACCEPT` -->
+Сохраняем правила iptables
+`sudo netfilter-persistent save`.
+Если у вас ARM архитектура, то создайте файл 
+`sudo nano /etc/sysctl.d/10-mysysctl.conf` и впишите 
+`net.ipv4.ip_forward=1`
 
 Заходим на вторую ВМ
 
