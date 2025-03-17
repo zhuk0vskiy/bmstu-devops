@@ -1,0 +1,25 @@
+stages:
+  - test
+  - check_ssh
+
+# Базовая проверка runner
+test_runner:
+  stage: test
+  tags:
+    - default
+  script:
+    - echo "Testing runner..."
+    - whoami
+    - pwd
+    - ls -la
+    - echo "CI_PROJECT_DIR - ${CI_PROJECT_DIR}"
+    - echo "Runner is working!"
+
+check_ssh_connection:
+  stage: check_ssh
+  tags:
+    - default
+  script:
+    - ssh -T admin@172.20.1.1
+    - ssh -v admin@172.20.1.1 'ip a'
+
