@@ -1,0 +1,73 @@
+stages:
+  - integration
+  - deploy
+  # - tests
+
+# func-tests:
+#   tags:
+#     - default
+#   stage: tests
+#   script:
+#     - cd ${CI_PROJECT_DIR}
+    
+
+build:
+  tags:
+    - default
+  stage: integration
+  before_script:
+    # Login to Docker Hub
+    - echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin docker.io
+  
+  script:
+    # Build and push using Docker
+    - cd ${CI_PROJECT_DIR}
+    - cd backend
+    # Build with SHA tag
+    - docker build -t "docker.io/${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:${CI_COMMIT_SHORT_SHA}" .
+    # Tag the same image as latest
+    - docker tag "docker.io/${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:${CI_COMMIT_SHORT_SHA}" "docker.io/${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:latest"
+    # Push both tags
+
+  after_script:
+    - docker logout docker.io
+
+push:
+  tags:
+    - default
+  stage: integration
+
+  before_script:
+    # Login to Docker Hub
+    - echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin docker.io
+
+  script:
+    - docker push "docker.io/${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:${CI_COMMIT_SHORT_SHA}"
+    - docker push "docker.io/${DOCKER_USERNAME}/${DOCKER_REPOSITORY}:latest"
+  
+  after_script:
+    - docker logout docker.io
+
+deploy:
+  stage: deploy
+  before_script:
+    - echo "Проверка Docker"
+    - docker --version || echo "Docker не установлен или нет прав"
+    - docker ps || echo "Нет прав для выполнения docker ps"
+    - docker run --rm hello-world || echo "Не удалось запустить контейнер"
+  script:
+    - id
+    - sed -i "s|\DOCKER_USERNAME|${DOCKER_USERNAME}|g; s|\DOCKER_REPOSITORY|${DOCKER_REPOSITORY}|g" docker-compose.yml
+    - scp docker-compose.yml admin@172.20.1.1:/home/admin/app
+
+    # - ssh admin@172.20.1.1 && cd /home/admin/app && docker-compose up -d backend
+    - ssh -T admin@172.20.1.1
+    - ssh -v admin@172.20.1.1 'cd /home/admin/app && docker-compose stop backend'
+    - ssh -v admin@172.20.1.1 'cd /home/admin/app && docker-compose rm backend'
+    - ssh -v admin@172.20.1.1 'cd /home/admin/app && docker-compose up -d backend'
+
+  tags:
+    - default
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual  # Добавлен ручной запуск в правила
