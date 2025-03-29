@@ -1,0 +1,54 @@
+version: "3.5"
+services:
+    dind:
+        image: docker:20-dind
+        container_name: dind
+        restart: always
+        privileged: true
+        environment:
+            DOCKER_TLS_CERTDIR: ""
+        command:
+            - --storage-driver=overlay2
+        volumes:
+            - ./data/dind/docker:/var/lib/docker
+
+    gitlab-runner:
+        image: gitlab/gitlab-runner:alpine
+        container_name: runner
+        restart: unless-stopped
+        environment:
+            - DOCKER_HOST=tcp://dind:2375
+        # command:
+        #     # Скачаем docker чтобы можно было увидеть какие есть контейнеры
+        #     - apk update
+        #     - apk add --no-cache docker
+        #     - addgroup gitlab-runner docker 
+        volumes:
+            - ./config:/etc/gitlab-runner:z
+            - ./data/runner/cache:/cache
+            - /var/run/docker.sock:/var/run/docker.sock
+        networks:
+            - gitlab_net
+        depends_on:
+            - gitlab
+
+    register-runner:
+        restart: "no"
+        image: gitlab/gitlab-runner:alpine
+        container_name: register
+        environment:
+            - REGISTRATION_TOKEN=${REGISTRATION_TOKEN}
+            - CI_SERVER_URL=${CI_SERVER_URL}
+        command:
+            - register
+            - --non-interactive
+            - --locked=false
+            - --name=${RUNNER_NAME}
+            - --executor=docker
+            - --docker-image=docker:20-dind
+            - --docker-volumes=/var/run/docker.sock:/var/run/docker.sock
+        volumes:
+            - ./config:/etc/gitlab-runner:z
+            - ./data/dind/docker:/var/lib/docker
+        depends_on:
+            - dind
