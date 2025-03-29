@@ -158,6 +158,44 @@ REQUESTS=$(echo "$STATUS" | awk 'NR==3 {print $3}')
 echo "nginx_active_connections $ACTIVE_CONNECTIONS" > "$OUTPUT_FILE"
 echo "nginx_requests_total $REQUESTS" >> "$OUTPUT_FILE"
 
+check_nginx() {
+    # 1. Проверка через systemctl
+    if systemctl is-active --quiet nginx; then
+        echo "nginx_systemd_active 1" >> "$OUTPUT_FILE"
+    else
+        echo "nginx_systemd_active 0" >> "$OUTPUT_FILE"
+    fi
+
+    # 2. Проверка процесса
+    if pgrep -x "nginx" >/dev/null; then
+        echo "nginx_process_running 1" >> "$OUTPUT_FILE"
+    else
+        echo "nginx_process_running 0" >> "$OUTPUT_FILE"
+    fi
+
+    # 3. Проверка статус-страницы
+    if STATUS=$(curl -s -m 2 http://localhost:8080/nginx_status 2>/dev/null); then
+        echo "nginx_status_available 1" >> "$OUTPUT_FILE"
+        # Парсим дополнительные метрики
+        echo "nginx_active_connections $(echo "$STATUS" | awk '/Active connections/ {print $3}')" >> "$OUTPUT_FILE"
+        echo "nginx_requests_total $(echo "$STATUS" | awk 'NR==3 {print $3}')" >> "$OUTPUT_FILE"
+    else
+        echo "nginx_status_available 0" >> "$OUTPUT_FILE"
+        echo "nginx_active_connections 0" >> "$OUTPUT_FILE"
+    fi
+
+    # Агрегированная метрика доступности
+    if [[ $(grep "nginx_systemd_active 1" "$OUTPUT_FILE") && \
+          $(grep "nginx_process_running 1" "$OUTPUT_FILE") && \
+          $(grep "nginx_status_available 1" "$OUTPUT_FILE") ]]; then
+        echo "nginx_up 1" >> "$OUTPUT_FILE"
+    else
+        echo "nginx_up 0" >> "$OUTPUT_FILE"
+    fi
+}
+
+check_nginx
+
 sudo chmod +x /opt/prometheus_scripts/nginx_metrics.sh
 sudo crontab -e
 
@@ -317,10 +355,192 @@ datasources:
 sudo mkdir -p /var/lib/grafana/dashboards
 
 4. Качаем dashboard для метрик системы + для папки и nginx
-`wget https://grafana.com/api/dashboards/1860/revisions/37/download`
-`sudo mv download /var/lib/grafana/dashboards/node_exporter.yaml`
-`sudo chown root:grafana /var/lib/grafana/dashboards/node_exporter.json`
-`sudo systemctl restart grafana-server`
+    - `wget https://grafana.com/api/dashboards/1860/revisions/37/download`
+    - `wget https://raw.githubusercontent.com/zhuk0vskiy/bmstu-devops/refs/heads/lab_03/my_dashboard.json`
+    - `sudo mv download /var/lib/grafana/dashboards/node_exporter.json`
+    - `sudo mv my_dashboard.json /var/lib/grafana/dashboards/my_dashboard.json` (тут еще метрика cpu есть, но она не работает, а убирать лень (но она и не нужна по сути))
+    - `sudo chown root:grafana /var/lib/grafana/dashboards/node_exporter.json`
+    - `sudo chown root:grafana /var/lib/grafana/dashboards/my_dashboard.json`
+    - `sudo systemctl restart grafana-server`
 
 
+## Alertmanager 
 
+смотрите на архитектуру
+```
+wget https://github.com/prometheus/alertmanager/releases/download/v0.26.0/alertmanager-0.26.0.linux-arm64.tar.gz
+tar xvf alertmanager-0.26.0.linux-arm64.tar.gz
+cd alertmanager-0.26.0.linux-arm64
+
+sudo cp alertmanager amtool /usr/local/bin/
+
+sudo useradd --no-create-home --shell /bin/false alertmanager
+
+sudo mkdir -p /etc/alertmanager /var/lib/alertmanager
+sudo chown alertmanager:alertmanager /etc/alertmanager /var/lib/alertmanager
+```
+sudo nano /etc/systemd/system/alertmanager.service
+```
+[Unit]
+Description=Alertmanager
+After=network.target
+
+[Service]
+User=alertmanager
+Group=alertmanager
+ExecStart=/usr/local/bin/alertmanager \
+  --config.file=/etc/alertmanager/alertmanager.yml \
+  --storage.path=/var/lib/alertmanager
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+sudo nano /etc/prometheus/prometheus.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['localhost:9093']  # Alertmanager слушает на 9093
+
+
+sudo nano /etc/prometheus/alert.rules.yml
+```
+groups:
+- name: nginx-alerts
+  rules:
+  - alert: NginxDown
+    expr: absent(nginx_up)
+    for: 10s
+    labels:
+      severity: critical
+    annotations:
+      summary: "Nginx is DOWN on {{ $labels.instance }}"
+      description: |
+        Nginx failed health checks. Current metrics:
+        - nginx_up: {{ $value }}
+        - nginx_systemd_active: {{ query "nginx_systemd_active" | first | value }}
+        - nginx_process_running: {{ query "nginx_process_running" | first | value }}
+        - nginx_status_available: {{ query "nginx_status_available" | first | value }}
+```
+sudo nano /etc/prometheus/prometheus.yml
+
+rule_files:
+  - 'alert.rules.yml'
+
+### Настраиваем бота
+
+3.1. Создаем бота через BotFather
+
+Откройте Telegram, найдите @BotFather.
+Отправьте команду /newbot.
+Укажите имя бота.
+Получите токен (сохраните его!).
+
+3.2. Узнаем Chat ID
+
+Напишите боту /start.
+Отправьте GET-запрос (подставьте токен):
+bash
+Copy
+curl https://api.telegram.org/bot<ВАШ_ТОКЕН>/getUpdates
+В ответе найдите chat.id (например, 123456789).
+
+#### Возвращаемся на ВМ1
+
+sudo nano /etc/alertmanager/alertmanager.yml
+
+```
+route:
+  receiver: 'telegram'
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 3h
+
+receivers:
+- name: 'telegram'
+  telegram_configs:
+  - api_url: "https://api.telegram.org"
+    bot_token: "<ВАШ_ТОКЕН>"
+    chat_id: <ВАШ_CHAT_ID>
+    message: "{{ .CommonAnnotations.summary }}\n{{ .CommonAnnotations.description }}"
+    send_resolved: true
+```
+
+```
+sudo systemctl daemon-reload
+sudo systemctl start alertmanager
+sudo systemctl enable alertmanager
+sudo systemctl status alertmanager
+```
+## blackbox_exporter
+
+архитектура
+```
+wget https://github.com/prometheus/blackbox_exporter/releases/download/v0.24.0/blackbox_exporter-0.24.0.linux-arm64.tar.gz
+tar xvf blackbox_exporter-*.tar.gz
+cd blackbox_exporter-*/
+
+
+sudo cp blackbox_exporter /usr/local/bin/
+sudo mkdir /etc/blackbox_exporter
+sudo cp blackbox.yml /etc/blackbox_exporter/
+
+
+sudo useradd --no-create-home --shell /bin/false blackbox_exporter
+sudo chown blackbox_exporter:blackbox_exporter /usr/local/bin/blackbox_exporter /etc/blackbox_exporter
+```
+
+sudo nano /etc/systemd/system/blackbox_exporter.service
+
+```
+[Unit]
+Description=Blackbox Exporter
+After=network.target
+
+[Service]
+User=blackbox_exporter
+Group=blackbox_exporter
+ExecStart=/usr/local/bin/blackbox_exporter \
+  --config.file=/etc/blackbox_exporter/blackbox.yml \
+  --web.listen-address=:9115
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+sudo nano /etc/prometheus/prometheus.yml
+```
+scrape_configs:
+  - job_name: 'blackbox-http'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+        - 'https://google.com'   # Пример дополнительного таргета
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: localhost:9115  # Адрес blackbox_exporter
+```
+
+```
+sudo systemctl daemon-reload
+sudo systemctl start blackbox_exporter
+sudo systemctl enable blackbox_exporter
+sudo systemctl status blackbox_exporter
+```
+
+
+ВМ2
+4. Качаем dashboard для метрик системы + для папки и nginx
+    - `wget https://grafana.com/api/dashboards/13659/revisions/1/download`
+    - `sudo mv download /var/lib/grafana/dashboards/black_box.json` 
+    - `sudo chown root:grafana /var/lib/grafana/dashboards/black_box.json`
+    - `sudo systemctl restart grafana-server`
