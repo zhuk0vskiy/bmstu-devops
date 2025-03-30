@@ -59,47 +59,56 @@ https://github.com/prometheus/blackbox_exporter
 
 # Решения
 
-Тк будет ставить графану прям на ВМ2, то сразу сделаем роутинг, чтоб можно было с хоста зайти 
-1. `sudo iptables -t nat -A PREROUTING -p tcp --dport 3000 -j DNAT --to-destination <ip-адрес второй ВМ>:3000`
+Тк будем ставить графану прям на ВМ2, то сразу сделаем роутинг, чтоб можно было с хоста зайти 
+1. Подключаемся к ВМ2 (рекомендую делать это с хоста по ssh)
+1. `sudo iptables -t nat -A PREROUTING -p tcp --dport 3000 -j DNAT --to-destination <ip-адрес второй ВМ внутренней>:3000`
 2. `sudo netfilter-persistent save`
 
 
 ## Node_exporter
 
-1. Установка и настройка node_exporter (для host metrics)
- смотрите версию архитектура
-wget https://github.com/prometheus/node_exporter/releases/download/v1.6.1/node_exporter-1.6.1.linux-arm64.tar.gz
-tar xvf node_exporter-1.6.1.linux-arm64.tar.gz
-cd node_exporter-1.6.1.linux-arm64/
-sudo cp node_exporter /usr/local/bin/
-sudo useradd --no-create-home --shell /bin/false node_exporter
-sudo chown node_exporter:node_exporter /usr/local/bin/node_exporter
+*Делаем эту часть на ВМ1 и ВМ2*
 
-Создание systemd-сервиса:
-sudo nano /etc/systemd/system/node_exporter.service
-```bash
-[Unit]
-Description=Node Exporter
-After=network.target
+- Установка и настройка node_exporter (для host metrics)
 
-[Service]
-User=node_exporter
-Group=node_exporter
-ExecStart=/usr/local/bin/node_exporter \
-    --collector.textfile.directory=/var/lib/node_exporter
+  Смотрите версию архитектура (если хост не мак, то меняйте на amd)
 
-[Install]
-WantedBy=multi-user.target
-```
-sudo mkdir /var/lib/node_exporter
-sudo mkdir -p /opt/prometheus_scripts
+  1. `wget https://github.com/prometheus/node_exporter/releases/download/v1.6.1/node_exporter-1.6.1.linux-arm64.tar.gz`
+  2. `tar xvf node_exporter-1.6.1.linux-arm64.tar.gz`
+  3. `cd node_exporter-1.6.1.linux-arm64/`
+  4. `sudo cp node_exporter /usr/local/bin/`
+  5. `sudo useradd --no-create-home --shell /bin/false node_exporter`
+  6. `sudo chown node_exporter:node_exporter /usr/local/bin/node_exporter`
 
-sudo systemctl daemon-reload
-sudo systemctl start node_exporter
-sudo systemctl enable node_exporter
+- Создание systemd-сервиса:
+  1. `sudo nano /etc/systemd/system/node_exporter.service`
 
-Проверка метрик
-curl http://localhost:9100/metrics
+      ```bash
+      [Unit]
+      Description=Node Exporter
+      After=network.target
+
+      [Service]
+      User=node_exporter
+      Group=node_exporter
+      ExecStart=/usr/local/bin/node_exporter \
+          --collector.textfile.directory=/var/lib/node_exporter
+
+      [Install]
+      WantedBy=multi-user.target
+      ```
+
+  2. `sudo mkdir /var/lib/node_exporter`
+  3. `sudo mkdir -p /opt/prometheus_scripts`
+
+- Запуск 
+
+  1. `sudo systemctl daemon-reload`
+  2. `sudo systemctl start node_exporter`
+  3. `sudo systemctl enable node_exporter`
+
+- Проверка метрик
+  1. `curl http://localhost:9100/metrics`
 
 <!-- Редактируем конфиг Prometheus (prometheus.yml):
 sudo nano /etc/prometheus/prometheus.yml
@@ -115,432 +124,453 @@ sudo systemctl restart prometheus -->
 
 ### Метрики папки
 
-sudo nano /opt/prometheus_scripts/prometheus_size.sh
+*Делаем эту часть на ВМ1*
 
-#!/bin/bash
-OUTPUT_FILE="/var/lib/node_exporter/prometheus_size.prom"
-PROMETHEUS_DIR="/var/lib/prometheus"
-SIZE=$(du -sb "$PROMETHEUS_DIR" | awk '{print $1}')
-echo "prometheus_dir_size_bytes $SIZE" > "$OUTPUT_FILE"
+- Создаем скрипт для складывания метрик
 
-sudo chmod +x /opt/prometheus_scripts/prometheus_size.sh
-sudo crontab -e
+  1. `sudo nano /opt/prometheus_scripts/prometheus_size.sh`
 
-Добавить туда строчку
-* * * * * /opt/prometheus_scripts/prometheus_size.sh
+      ```bash
+      #!/bin/bash
+      OUTPUT_FILE="/var/lib/node_exporter/prometheus_size.prom"
+      PROMETHEUS_DIR="/var/lib/prometheus"
+      SIZE=$(du -sb "$PROMETHEUS_DIR" | awk '{print $1}')
+      echo "prometheus_dir_size_bytes $SIZE" > "$OUTPUT_FILE"
+      ```
+
+
+  2. `sudo chmod +x /opt/prometheus_scripts/prometheus_size.sh`
+  3. `sudo crontab -e`
+
+      Добавить туда строчку
+      `* * * * * /opt/prometheus_scripts/prometheus_size.sh`
 
 ### Метрики nginx
 
-sudo nano /etc/nginx/conf.d/status.conf
+*Делаем эту часть на ВМ1*
 
-server {
-    listen 8080;
-    server_name localhost;
+- Добавляем отдельный ендпоинт для проверки статуса
 
-    location /nginx_status {
-        stub_status on;
-        access_log off;
-        allow 127.0.0.1;
-        deny all;
+1.  `sudo nano /etc/nginx/conf.d/status.conf`
+    ```
+    server {
+        listen 8080;
+        server_name localhost;
+
+        location /nginx_status {
+            stub_status on;
+            access_log off;
+            allow 127.0.0.1;
+            deny all;
+        }
     }
-}
+    ```
 
-sudo nginx -t
-sudo systemctl restart nginx
+2. `sudo nginx -t`
+3. `sudo systemctl restart nginx`
 
-sudo nano /opt/prometheus_scripts/nginx_metrics.sh
+- Создам скрипт для складывания метрик
 
-#!/bin/bash
-OUTPUT_FILE="/var/lib/node_exporter/nginx_metrics.prom"
-STATUS=$(curl -s http://localhost:8080/nginx_status)
-ACTIVE_CONNECTIONS=$(echo "$STATUS" | awk '/Active connections/ {print $3}')
-REQUESTS=$(echo "$STATUS" | awk 'NR==3 {print $3}')
-echo "nginx_active_connections $ACTIVE_CONNECTIONS" > "$OUTPUT_FILE"
-echo "nginx_requests_total $REQUESTS" >> "$OUTPUT_FILE"
+1. `sudo nano /opt/prometheus_scripts/nginx_metrics.sh`
+    ```bash
+    #!/bin/bash
+    OUTPUT_FILE="/var/lib/node_exporter/nginx_metrics.prom"
+    STATUS=$(curl -s http://localhost:8080/nginx_status)
+    ACTIVE_CONNECTIONS=$(echo "$STATUS" | awk '/Active connections/ {print $3}')
+    REQUESTS=$(echo "$STATUS" | awk 'NR==3 {print $3}')
+    echo "nginx_active_connections $ACTIVE_CONNECTIONS" > "$OUTPUT_FILE"
+    echo "nginx_requests_total $REQUESTS" >> "$OUTPUT_FILE"
 
-check_nginx() {
-    # 1. Проверка через systemctl
-    if systemctl is-active --quiet nginx; then
-        echo "nginx_systemd_active 1" >> "$OUTPUT_FILE"
-    else
-        echo "nginx_systemd_active 0" >> "$OUTPUT_FILE"
-    fi
+    check_nginx() {
+        # 1. Проверка через systemctl
+        if systemctl is-active --quiet nginx; then
+            echo "nginx_systemd_active 1" >> "$OUTPUT_FILE"
+        else
+            echo "nginx_systemd_active 0" >> "$OUTPUT_FILE"
+        fi
 
-    # 2. Проверка процесса
-    if pgrep -x "nginx" >/dev/null; then
-        echo "nginx_process_running 1" >> "$OUTPUT_FILE"
-    else
-        echo "nginx_process_running 0" >> "$OUTPUT_FILE"
-    fi
+        # 2. Проверка процесса
+        if pgrep -x "nginx" >/dev/null; then
+            echo "nginx_process_running 1" >> "$OUTPUT_FILE"
+        else
+            echo "nginx_process_running 0" >> "$OUTPUT_FILE"
+        fi
 
-    # 3. Проверка статус-страницы
-    if STATUS=$(curl -s -m 2 http://localhost:8080/nginx_status 2>/dev/null); then
-        echo "nginx_status_available 1" >> "$OUTPUT_FILE"
-        # Парсим дополнительные метрики
-        echo "nginx_active_connections $(echo "$STATUS" | awk '/Active connections/ {print $3}')" >> "$OUTPUT_FILE"
-        echo "nginx_requests_total $(echo "$STATUS" | awk 'NR==3 {print $3}')" >> "$OUTPUT_FILE"
-    else
-        echo "nginx_status_available 0" >> "$OUTPUT_FILE"
-        echo "nginx_active_connections 0" >> "$OUTPUT_FILE"
-    fi
+        # 3. Проверка статус-страницы
+        if STATUS=$(curl -s -m 2 http://localhost:8080/nginx_status 2>/dev/null); then
+            echo "nginx_status_available 1" >> "$OUTPUT_FILE"
+            # Парсим дополнительные метрики
+            echo "nginx_active_connections $(echo "$STATUS" | awk '/Active connections/ {print $3}')" >> "$OUTPUT_FILE"
+            echo "nginx_requests_total $(echo "$STATUS" | awk 'NR==3 {print $3}')" >> "$OUTPUT_FILE"
+        else
+            echo "nginx_status_available 0" >> "$OUTPUT_FILE"
+            echo "nginx_active_connections 0" >> "$OUTPUT_FILE"
+        fi
 
-    # Агрегированная метрика доступности
-    if [[ $(grep "nginx_systemd_active 1" "$OUTPUT_FILE") && \
-          $(grep "nginx_process_running 1" "$OUTPUT_FILE") && \
-          $(grep "nginx_status_available 1" "$OUTPUT_FILE") ]]; then
-        echo "nginx_up 1" >> "$OUTPUT_FILE"
-    else
-        echo "nginx_up 0" >> "$OUTPUT_FILE"
-    fi
-}
+        # Агрегированная метрика доступности
+        if [[ $(grep "nginx_systemd_active 1" "$OUTPUT_FILE") && \
+              $(grep "nginx_process_running 1" "$OUTPUT_FILE") && \
+              $(grep "nginx_status_available 1" "$OUTPUT_FILE") ]]; then
+            echo "nginx_up 1" >> "$OUTPUT_FILE"
+        else
+            echo "nginx_up 0" >> "$OUTPUT_FILE"
+        fi
+    }
 
-check_nginx
+    check_nginx
+    ```
 
-sudo chmod +x /opt/prometheus_scripts/nginx_metrics.sh
-sudo crontab -e
 
-* * * * * /opt/prometheus_scripts/nginx_metrics.sh
+2. `sudo chmod +x /opt/prometheus_scripts/nginx_metrics.sh`
+3. `sudo crontab -e`
+
+4. `* * * * * /opt/prometheus_scripts/nginx_metrics.sh`
 
 ## Prometheus
 
-Создание пользователя для Prometheus (опционально)
+*Делаем эту часть на ВМ1*
+
+- Создание пользователя для Prometheus (опционально)
 Рекомендуется запускать Prometheus под отдельным пользователем:
-sudo useradd --no-create-home --shell /bin/false prometheus
 
-Скачивание и установка Prometheus
-3.1. Загрузка последней версии
-смотрите на архитектуру, если мак, то надо arm
-wget https://github.com/prometheus/prometheus/releases/download/v2.47.0/prometheus-2.47.0.linux-amd64.tar.gz
+    1. `sudo useradd --no-create-home --shell /bin/false prometheus`
 
-3.2. Распаковка архива
-tar xvf prometheus-2.47.0.linux-amd64.tar.gz
-cd prometheus-2.47.0.linux-amd64/
+- Скачивание и установка Prometheus
 
-3.3. Копирование файлов в системные директории
-sudo mkdir -p /etc/prometheus
-sudo mkdir -p /var/lib/prometheus
-sudo cp prometheus promtool /usr/local/bin/
-sudo cp -r consoles/ console_libraries/ /etc/prometheus/
-sudo cp prometheus.yml /etc/prometheus/
+  смотрите на архитектуру(если мак, то надо arm)
 
-3.4. Настройка прав
-sudo chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
-sudo chown prometheus:prometheus /usr/local/bin/{prometheus,promtool}
+  1. `wget https://github.com/prometheus/prometheus/releases/download/v2.47.0/prometheus-2.47.0.linux-amd64.tar.gz`
 
 
-4. Настройка конфигурации
-sudo nano /etc/prometheus/prometheus.yml
-```
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-
-scrape_configs:
-  - job_name: "prometheus"
-    static_configs:
-      - targets: ["localhost:9090"]
-  - job_name: "prometheus"
-    static_configs:
-      - targets: ["localhost:9100", "<ip ВМ2 внутренней сети>:9090"]   
-```
-
-5. Создание systemd-сервиса
-sudo nano /etc/systemd/system/prometheus.service
-```
-[Unit]
-Description=Prometheus
-Wants=network-online.target
-After=network-online.target
-
-[Service]
-User=prometheus
-Group=prometheus
-ExecStart=/usr/local/bin/prometheus \
-  --config.file=/etc/prometheus/prometheus.yml \
-  --storage.tsdb.path=/var/lib/prometheus/ \
-  --web.console.templates=/etc/prometheus/consoles \
-  --web.console.libraries=/etc/prometheus/console_libraries \
-  --storage.tsdb.retention.time=1d \ # срок метрик
-  --storage.tsdb.retention.size=1GB # количество метрик
-
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-6. Запуск Prometheus
-sudo systemctl daemon-reload
-sudo systemctl start prometheus
-sudo systemctl enable prometheus
-статус
-sudo systemctl status prometheus
+  2. `tar xvf prometheus-2.47.0.linux-amd64.tar.gz`
+  3. `cd prometheus-2.47.0.linux-amd64/`
 
 
-7. Проверка работы
-http://<ваш_IP_сервера>:9090
+  4. `sudo mkdir -p /etc/prometheus`
+  5. `sudo mkdir -p /var/lib/prometheus`
+  6. `sudo cp prometheus promtool /usr/local/bin/`
+  7. `sudo cp -r consoles/ console_libraries/ /etc/prometheus/`
+  8. `sudo cp prometheus.yml /etc/prometheus/`
 
-8. Тут же чекаем что метрики папки и nginx собираются 
-prometheus_dir_size_bytes
-nginx_requests_total
-nginx_active_connections
+
+  9. `sudo chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus`
+  10. `sudo chown prometheus:prometheus /usr/local/bin/{prometheus,promtool}`
+
+
+- Настройка конфигурации
+  1. `sudo nano /etc/prometheus/prometheus.yml`
+
+      ```
+      global:
+        scrape_interval: 15s
+        evaluation_interval: 15s
+
+      scrape_configs:
+        - job_name: "prometheus"
+          static_configs:
+            - targets: ["localhost:9090"]
+        - job_name: "node_exporter"
+          static_configs:
+            - targets: ["localhost:9090", "<ip ВМ2 внутренней сети>:9090"]   
+      ```
+
+
+  2. `sudo nano /etc/systemd/system/prometheus.service`
+      ```
+      [Unit]
+      Description=Prometheus
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      User=prometheus
+      Group=prometheus
+      ExecStart=/usr/local/bin/prometheus \
+        --config.file=/etc/prometheus/prometheus.yml \
+        --storage.tsdb.path=/var/lib/prometheus/ \
+        --web.console.templates=/etc/prometheus/consoles \
+        --web.console.libraries=/etc/prometheus/console_libraries \
+        --storage.tsdb.retention.time=1d \ # срок метрик
+        --storage.tsdb.retention.size=1GB # количество метрик
+
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+      ```
+
+- Запуск Prometheus
+  1. `sudo systemctl daemon-reload`
+  2. `sudo systemctl start prometheus`
+  3. `sudo systemctl enable prometheus`
+  4. `sudo systemctl status prometheus`
+
+
+- Проверка работы
+  1. с хоста в браузере `http://<ваш_IP_сервера>:9090`
+
+2. Тут же чекаем что метрики папки и nginx собираются 
+  `prometheus_dir_size_bytes`
+  `nginx_requests_total`
+  `nginx_active_connections`
 
 
 ## Grafana
 
-1. Добавление репозитория Grafana
-sudo apt-get install -y apt-transport-https
-sudo apt-get install -y software-properties-common wget
-wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
-echo "deb https://packages.grafana.com/oss/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+*Делаем эту часть на ВМ2*
 
-2. Обновление пакетов и установка
-sudo apt-get update
-sudo apt-get install grafana
+- установка Grafana
+  1. `sudo apt-get install -y apt-transport-https`
+  2. `sudo apt-get install -y software-properties-common wget`
+  3. `wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -`
+  4. `echo "deb https://packages.grafana.com/oss/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list`
+  5. `sudo apt-get update`
+  6. `sudo apt-get install grafana`
 
-3. Запуск и автоматический старт при загрузке
-sudo systemctl daemon-reload
-sudo systemctl start grafana-server
-sudo systemctl enable grafana-server
-
-4. Проверка статуса
-sudo systemctl status grafana-server
+- Запуск и автоматический старт при загрузке
+  1. `sudo systemctl daemon-reload`
+  2. `sudo systemctl start grafana-server`
+  3. `sudo systemctl enable grafana-server`
+  4. `sudo systemctl status grafana-server`
 
 ### Настройка datasource
 
-5. Откройте файл конфигурации
-sudo nano /etc/grafana/grafana.ini
+- Откройте файл конфигурации
+1. `sudo nano /etc/grafana/grafana.ini`
 
-6. Добавьте в секцию [datasources]
-api_version = 1
-datasources.yaml = /etc/grafana/provisioning/datasources/default.yaml
+    Добавьте в секцию [datasources]
+    ```
+    api_version = 1
+    datasources.yaml = /etc/grafana/provisioning/datasources/default.yaml
+    ```
 
-7. Создайте файл с настройками источника данных:
-sudo mkdir -p /etc/grafana/provisioning/datasources
-sudo nano /etc/grafana/provisioning/datasources/default.yaml
 
-8. Вставьте конфиг для Prometheus:
-apiVersion: 1
-datasources:
-  - name: Prometheus
-    type: prometheus
-    url: http://<ip-ВМ1 внутренней сети>:9090  # Укажите IP, если Prometheus на другом сервере
-    access: proxy
-    isDefault: true
-    version: 1
-    editable: false
+2. `sudo mkdir -p /etc/grafana/provisioning/datasources`
+3. `sudo nano /etc/grafana/provisioning/datasources/default.yaml`
+    ```
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://<ip-ВМ1 внутренней сети>:9090  # Укажите IP, если Prometheus на другом сервере
+        access: proxy
+        isDefault: true
+        version: 1
+        editable: false
+    ```
 
 ### Настройка dashboard
 
-1. Создайте директорию для дашбордов:
-    `sudo mkdir -p /etc/grafana/provisioning/dashboards`
+- Создайте директорию для дашбордов:
+  1. `sudo mkdir -p /etc/grafana/provisioning/dashboards`
 
-    `sudo nano /etc/grafana/provisioning/dashboards/default.yaml`
+  2. `sudo nano /etc/grafana/provisioning/dashboards/default.yaml`
 
-2. Добавьте конфиг:
-    ```
-    apiVersion: 1
-    providers:
-    - name: 'Default'
-        orgId: 1
-        folder: ''
-        type: file
-        disableDeletion: false
-        updateIntervalSeconds: 10
-        options:
-        path: /var/lib/grafana/dashboards
-    ```
+      ```
+      apiVersion: 1
+      providers:
+      - name: 'Default'
+          orgId: 1
+          folder: ''
+          type: file
+          disableDeletion: false
+          updateIntervalSeconds: 10
+          options:
+          path: /var/lib/grafana/dashboards
+      ```
 
-3. Создайте директорию для дашбордов и скопируйте их:
-sudo mkdir -p /var/lib/grafana/dashboards
+  3. `sudo mkdir -p /var/lib/grafana/dashboards`
 
-4. Качаем dashboard для метрик системы + для папки и nginx
-    - `wget https://grafana.com/api/dashboards/1860/revisions/37/download`
-    - `wget https://raw.githubusercontent.com/zhuk0vskiy/bmstu-devops/refs/heads/lab_03/my_dashboard.json`
-    - `sudo mv download /var/lib/grafana/dashboards/node_exporter.json`
-    - `sudo mv my_dashboard.json /var/lib/grafana/dashboards/my_dashboard.json` (тут еще метрика cpu есть, но она не работает, а убирать лень (но она и не нужна по сути))
-    - `sudo chown root:grafana /var/lib/grafana/dashboards/node_exporter.json`
-    - `sudo chown root:grafana /var/lib/grafana/dashboards/my_dashboard.json`
-    - `sudo systemctl restart grafana-server`
+- Качаем dashboard для метрик системы + для папки и nginx
+    1. `wget https://grafana.com/api/dashboards/1860/revisions/37/download`
+    2. `wget https://raw.githubusercontent.com/zhuk0vskiy/bmstu-devops/refs/heads/lab_03/my_dashboard.json`
+    3. `sudo mv download /var/lib/grafana/dashboards/node_exporter.json`
+    4. `sudo mv my_dashboard.json /var/lib/grafana/dashboards/my_dashboard.json` (тут еще метрика cpu есть, но она не работает, а убирать лень (но она и не нужна по сути))
+    5. `sudo chown root:grafana /var/lib/grafana/dashboards/node_exporter.json`
+    6. `sudo chown root:grafana /var/lib/grafana/dashboards/my_dashboard.json`
+    7. `sudo systemctl restart grafana-server`
+    8. `wget https://grafana.com/api/dashboards/13659/revisions/1/download`
+    9. `sudo mv download /var/lib/grafana/dashboards/black_box.json` 
+    10. `sudo chown root:grafana /var/lib/grafana/dashboards/black_box.json`
+    11. `sudo systemctl restart grafana-server`
 
 
 ## Alertmanager 
 
-смотрите на архитектуру
-```
-wget https://github.com/prometheus/alertmanager/releases/download/v0.26.0/alertmanager-0.26.0.linux-arm64.tar.gz
-tar xvf alertmanager-0.26.0.linux-arm64.tar.gz
-cd alertmanager-0.26.0.linux-arm64
+*Делаем эту часть на ВМ1*
 
-sudo cp alertmanager amtool /usr/local/bin/
+- смотрите на архитектуру (если не мак, то смените на amd)
 
-sudo useradd --no-create-home --shell /bin/false alertmanager
+  1. `wget https://github.com/prometheus/alertmanager/releases/download/v0.26.0/alertmanager-0.26.0.linux-arm64.tar.gz`
+  2. `tar xvf alertmanager-0.26.0.linux-arm64.tar.gz`
+  3. `cd alertmanager-0.26.0.linux-arm64`
 
-sudo mkdir -p /etc/alertmanager /var/lib/alertmanager
-sudo chown alertmanager:alertmanager /etc/alertmanager /var/lib/alertmanager
-```
-sudo nano /etc/systemd/system/alertmanager.service
-```
-[Unit]
-Description=Alertmanager
-After=network.target
+  4. `sudo cp alertmanager amtool /usr/local/bin/`
 
-[Service]
-User=alertmanager
-Group=alertmanager
-ExecStart=/usr/local/bin/alertmanager \
-  --config.file=/etc/alertmanager/alertmanager.yml \
-  --storage.path=/var/lib/alertmanager
-Restart=always
+  5. `sudo useradd --no-create-home --shell /bin/false alertmanager`
 
-[Install]
-WantedBy=multi-user.target
-```
-sudo nano /etc/prometheus/prometheus.yml
+  6. `sudo mkdir -p /etc/alertmanager /var/lib/alertmanager`
+  7. `sudo chown alertmanager:alertmanager /etc/alertmanager /var/lib/alertmanager`
 
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: ['localhost:9093']  # Alertmanager слушает на 9093
+  8. `sudo nano /etc/systemd/system/alertmanager.service`
+      ```
+      [Unit]
+      Description=Alertmanager
+      After=network.target
+
+      [Service]
+      User=alertmanager
+      Group=alertmanager
+      ExecStart=/usr/local/bin/alertmanager \
+        --config.file=/etc/alertmanager/alertmanager.yml \
+        --storage.path=/var/lib/alertmanager
+      Restart=always
+
+      [Install]
+      WantedBy=multi-user.target
+      ```
+
+  9. `sudo nano /etc/prometheus/prometheus.yml`
+      ```
+      alerting:
+        alertmanagers:
+          - static_configs:
+              - targets: ['localhost:9093']  # Alertmanager слушает на 9093
+      ```
+
+  10. `sudo nano /etc/prometheus/alert.rules.yml`
+      ```
+      groups:
+      - name: nginx-alerts
+        rules:
+        - alert: NginxDown
+          expr: absent(nginx_up)
+          for: 10s
+          labels:
+            severity: critical
+          annotations:
+            summary: "Nginx is DOWN on {{ $labels.instance }}"
+            description: |
+              Nginx failed health checks. Current metrics:
+              - nginx_up: {{ $value }}
+              - nginx_systemd_active: {{ query "nginx_systemd_active" | first | value }}
+              - nginx_process_running: {{ query "nginx_process_running" | first | value }}
+              - nginx_status_available: {{ query "nginx_status_available" | first | value }}
+      ```
+  11. `sudo nano /etc/prometheus/prometheus.yml`
+  добавляем
+      ```
+      rule_files:
+        - 'alert.rules.yml'
+      ```
+
+12. `sudo nano /etc/alertmanager/alertmanager.yml`
+
+    Как получить токен написано ниже
+    ```
+    route:
+      receiver: 'telegram'
+      group_by: ['alertname']
+      group_wait: 10s
+      group_interval: 5m
+      repeat_interval: 3h
+
+    receivers:
+    - name: 'telegram'
+      telegram_configs:
+      - api_url: "https://api.telegram.org"
+        bot_token: "<ВАШ_ТОКЕН>"
+        chat_id: <ВАШ_CHAT_ID>
+        message: "{{ .CommonAnnotations.summary }}\n{{ .CommonAnnotations.description }}"
+        send_resolved: true
+    ```
 
 
-sudo nano /etc/prometheus/alert.rules.yml
-```
-groups:
-- name: nginx-alerts
-  rules:
-  - alert: NginxDown
-    expr: absent(nginx_up)
-    for: 10s
-    labels:
-      severity: critical
-    annotations:
-      summary: "Nginx is DOWN on {{ $labels.instance }}"
-      description: |
-        Nginx failed health checks. Current metrics:
-        - nginx_up: {{ $value }}
-        - nginx_systemd_active: {{ query "nginx_systemd_active" | first | value }}
-        - nginx_process_running: {{ query "nginx_process_running" | first | value }}
-        - nginx_status_available: {{ query "nginx_status_available" | first | value }}
-```
-sudo nano /etc/prometheus/prometheus.yml
-
-rule_files:
-  - 'alert.rules.yml'
+13. `sudo systemctl daemon-reload`
+14. `sudo systemctl start alertmanager`
+15. `sudo systemctl enable alertmanager`
+16. `sudo systemctl status alertmanager`
 
 ### Настраиваем бота
 
-3.1. Создаем бота через BotFather
+*Делаем эту часть в Телеге*
 
-Откройте Telegram, найдите @BotFather.
-Отправьте команду /newbot.
-Укажите имя бота.
-Получите токен (сохраните его!).
+1. Откройте Telegram, найдите @BotFather.
+2. Отправьте команду /newbot.
+3. Укажите имя бота.
+4. Получите токен (сохраните его!).
 
-3.2. Узнаем Chat ID
+5. Напишите боту /start.
+6. Отправьте GET-запрос c хоста (подставьте токен):
 
-Напишите боту /start.
-Отправьте GET-запрос (подставьте токен):
-bash
-Copy
-curl https://api.telegram.org/bot<ВАШ_ТОКЕН>/getUpdates
-В ответе найдите chat.id (например, 123456789).
+    `curl https://api.telegram.org/bot<ВАШ_ТОКЕН>/getUpdates`
 
-#### Возвращаемся на ВМ1
+    В ответе найдите chat.id (например, 123456789).
 
-sudo nano /etc/alertmanager/alertmanager.yml
+### Теперь стопните nginx и чекните что через минуту пришло уведовление в боте
 
-```
-route:
-  receiver: 'telegram'
-  group_by: ['alertname']
-  group_wait: 10s
-  group_interval: 5m
-  repeat_interval: 3h
 
-receivers:
-- name: 'telegram'
-  telegram_configs:
-  - api_url: "https://api.telegram.org"
-    bot_token: "<ВАШ_ТОКЕН>"
-    chat_id: <ВАШ_CHAT_ID>
-    message: "{{ .CommonAnnotations.summary }}\n{{ .CommonAnnotations.description }}"
-    send_resolved: true
-```
-
-```
-sudo systemctl daemon-reload
-sudo systemctl start alertmanager
-sudo systemctl enable alertmanager
-sudo systemctl status alertmanager
-```
 ## blackbox_exporter
 
-архитектура
-```
-wget https://github.com/prometheus/blackbox_exporter/releases/download/v0.24.0/blackbox_exporter-0.24.0.linux-arm64.tar.gz
-tar xvf blackbox_exporter-*.tar.gz
-cd blackbox_exporter-*/
+*Делаем эту часть на ВМ1*
+
+- Опять смотрим на архитектуру (amd / arm)
+
+1. `wget https://github.com/prometheus/blackbox_exporter/releases/download/v0.24.0/blackbox_exporter-0.24.0.linux-arm64.tar.gz`
+2. `tar xvf blackbox_exporter-*.tar.gz`
+3. `cd blackbox_exporter-*/`
+4. `sudo cp blackbox_exporter /usr/local/bin/`
+5. `sudo mkdir /etc/blackbox_exporter`
+6. `sudo cp blackbox.yml /etc/blackbox_exporter/`
+7. `sudo useradd --no-create-home --shell /bin/false blackbox_exporter`
+8. `sudo chown blackbox_exporter:blackbox_exporter /usr/local/bin/blackbox_exporter /etc/blackbox_exporter`
 
 
-sudo cp blackbox_exporter /usr/local/bin/
-sudo mkdir /etc/blackbox_exporter
-sudo cp blackbox.yml /etc/blackbox_exporter/
+9. `sudo nano /etc/systemd/system/blackbox_exporter.service`
+
+    ```
+    [Unit]
+    Description=Blackbox Exporter
+    After=network.target
+
+    [Service]
+    User=blackbox_exporter
+    Group=blackbox_exporter
+    ExecStart=/usr/local/bin/blackbox_exporter \
+      --config.file=/etc/blackbox_exporter/blackbox.yml \
+      --web.listen-address=:9115
+    Restart=always
+
+    [Install]
+    WantedBy=multi-user.target
+    ```
+
+10. `sudo nano /etc/prometheus/prometheus.yml`
+
+    Добавляем 
+    ```
+    scrape_configs:
+      - job_name: 'blackbox-http'
+        metrics_path: /probe
+        params:
+          module: [http_2xx]
+        static_configs:
+          - targets:
+            - 'https://google.com'   # Пример дополнительного таргета
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: localhost:9115  # Адрес blackbox_exporter
+    ```
 
 
-sudo useradd --no-create-home --shell /bin/false blackbox_exporter
-sudo chown blackbox_exporter:blackbox_exporter /usr/local/bin/blackbox_exporter /etc/blackbox_exporter
-```
-
-sudo nano /etc/systemd/system/blackbox_exporter.service
-
-```
-[Unit]
-Description=Blackbox Exporter
-After=network.target
-
-[Service]
-User=blackbox_exporter
-Group=blackbox_exporter
-ExecStart=/usr/local/bin/blackbox_exporter \
-  --config.file=/etc/blackbox_exporter/blackbox.yml \
-  --web.listen-address=:9115
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-sudo nano /etc/prometheus/prometheus.yml
-```
-scrape_configs:
-  - job_name: 'blackbox-http'
-    metrics_path: /probe
-    params:
-      module: [http_2xx]
-    static_configs:
-      - targets:
-        - 'https://google.com'   # Пример дополнительного таргета
-    relabel_configs:
-      - source_labels: [__address__]
-        target_label: __param_target
-      - source_labels: [__param_target]
-        target_label: instance
-      - target_label: __address__
-        replacement: localhost:9115  # Адрес blackbox_exporter
-```
-
-```
-sudo systemctl daemon-reload
-sudo systemctl start blackbox_exporter
-sudo systemctl enable blackbox_exporter
-sudo systemctl status blackbox_exporter
-```
+11. `sudo systemctl daemon-reload`
+12. `sudo systemctl start blackbox_exporter`
+13. `sudo systemctl enable blackbox_exporter`
+14. `sudo systemctl status blackbox_exporter`
 
 
-ВМ2
-4. Качаем dashboard для метрик системы + для папки и nginx
-    - `wget https://grafana.com/api/dashboards/13659/revisions/1/download`
-    - `sudo mv download /var/lib/grafana/dashboards/black_box.json` 
-    - `sudo chown root:grafana /var/lib/grafana/dashboards/black_box.json`
-    - `sudo systemctl restart grafana-server`
+
