@@ -271,7 +271,7 @@ sudo systemctl restart prometheus -->
             - targets: ["localhost:9090"]
         - job_name: "node_exporter"
           static_configs:
-            - targets: ["localhost:9090", "<ip ВМ2 внутренней сети>:9090"]   
+            - targets: ["localhost:9100", "<ip ВМ2 внутренней сети>:9100"]   
       ```
 
 
