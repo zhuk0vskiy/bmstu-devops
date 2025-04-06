@@ -376,7 +376,7 @@ sudo systemctl restart prometheus -->
           disableDeletion: false
           updateIntervalSeconds: 10
           options:
-          path: /var/lib/grafana/dashboards
+              path: /var/lib/grafana/dashboards
       ```
 
   3. `sudo mkdir -p /var/lib/grafana/dashboards`
