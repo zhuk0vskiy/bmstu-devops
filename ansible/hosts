@@ -1,0 +1,14 @@
+[web]  # Группа web (ВМ1 и ВМ2)
+vm1 ansible_host=IP_ВМ1 ansible_connection=local
+vm2 ansible_host=IP_ВМ2 ansible_user=admin ansible_ssh_private_key_file=~/.ssh/id_ed25519
+
+[db]   # Группа db (только ВМ2)
+vm2 ansible_host=IP_ВМ2
+
+[all:vars]  # Общие переменные
+ansible_user=user  # Пользователь для подключения
+ansible_ssh_private_key_file=~/.ssh/id_ed25519  # Путь к SSH-ключу
+
+[all:children]
+web
+db

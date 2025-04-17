@@ -1,0 +1,24 @@
+---
+- name: Install PostgreSQL packages
+  apt:
+    name: "{{ postgresql_packages }}"
+    state: present
+    update_cache: yes
+
+- name: Ensure PostgreSQL service is running and enabled
+  systemd:
+    name: "{{ postgresql_service }}"
+    state: "{{ postgresql_service_state }}"
+    enabled: "{{ postgresql_service_enabled }}"
+  notify: restart postgresql
+
+- name: Create PostgreSQL databases
+  become: yes
+  become_user: postgres
+  postgresql_db:
+    name: "{{ item.name }}"
+    encoding: "{{ item.encoding }}"
+    lc_collate: "{{ item.lc_collate }}"
+    lc_ctype: "{{ item.lc_ctype }}"
+  loop: "{{ postgresql_databases }}"
+  when: postgresql_databases is defined

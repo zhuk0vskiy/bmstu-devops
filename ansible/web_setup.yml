@@ -1,0 +1,51 @@
+---
+- name: Install and configure Nginx
+  hosts: web  # или конкретный хост для веб-сервера
+  become: yes
+  tasks:
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+
+    - name: Ensure Nginx service is running and enabled
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Configure basic index page
+      copy:
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Ansible-managed Nginx</title>
+          </head>
+          <body>
+              <h1>Welcome to {{ ansible_hostname }}</h1>
+              <p>Managed by Ansible</p>
+          </body>
+          </html>
+        dest: /var/www/html/index.html
+        mode: 0644
+
+    - name: Allow HTTP traffic in firewall
+      ufw:
+        rule: allow
+        port: 80
+        proto: tcp
+
+    - name: Verify Nginx installation
+      uri:
+        url: "http://{{ ansible_host }}"
+        return_content: yes
+      register: nginx_result
+      until: nginx_result.status == 200
+      retries: 5
+      delay: 3
+
+    - name: Show access info
+      debug:
+        msg: "Nginx is running. Access at: http://{{ ansible_host }}"

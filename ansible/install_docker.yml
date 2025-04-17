@@ -1,0 +1,37 @@
+- name: Install and configure Docker with log limits
+  hosts: db
+  become: yes
+  vars:
+    # Основные переменные для роли geerlingguy.docker
+    docker_users:
+      - "{{ ansible_user }}"
+    
+    docker_install_compose: true
+    docker_compose_version: "1.29.2"
+    
+    # Конфигурация демона Docker
+    docker_configure_daemon: true
+    docker_daemon_config:
+      log-driver: "json-file"
+      log-opts:
+        max-size: "10m"    # Максимальный размер файла лога
+        max-file: "3"      # Максимальное количество файлов логов
+      storage-driver: "overlay2"
+      default-ulimits:
+        nofile:
+          soft: 65536
+          hard: 65536
+
+  roles:
+    - role: geerlingguy.docker
+
+  tasks:
+    - name: Verify Docker log configuration
+      command: docker info --format '{{ "{{.LoggingDriver}}" }}'
+      register: docker_log_driver
+      changed_when: false
+
+    - name: Verify Docker log options
+      command: docker info --format '{{ "{{json .LoggingConfig}}" }}'
+      register: docker_log_config
+      changed_when: false

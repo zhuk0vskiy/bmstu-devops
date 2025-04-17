@@ -1,0 +1,23 @@
+---
+# Версия PostgreSQL
+postgresql_version: 14
+
+# Пакеты для установки
+postgresql_packages:
+  - "postgresql-{{ postgresql_version }}"
+  - "postgresql-client-{{ postgresql_version }}"
+  - "postgresql-contrib-{{ postgresql_version }}"
+  - libpq-dev
+  - python3-psycopg2
+
+# Настройки сервиса
+postgresql_service: postgresql
+postgresql_service_state: started
+postgresql_service_enabled: true
+
+# Настройки базы данных
+postgresql_databases:
+  - name: ansible_db
+    encoding: UTF-8
+    lc_collate: en_US.UTF-8
+    lc_ctype: en_US.UTF-8

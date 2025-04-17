@@ -1,0 +1,37 @@
+---
+- name: Install common packages on all VMs
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install common packages
+      apt:
+        name: "{{ common_packages }}"
+        state: present
+      vars:
+        common_packages:
+          - git       # система контроля версий
+
+- name: Install packages only on VM1
+  hosts: web
+  become: yes
+  tasks:
+    - name: Install web packages
+      apt:
+        name: "{{ vm1_packages }}"
+        state: present
+      vars:
+        vm1_packages:
+          - python3-dev # инструменты для разработки на Python
+
+- name: Install packages only on VM2
+  hosts: db
+  become: yes
+  tasks:
+    - name: Install db packages
+      apt:
+        name: "{{ vm2_packages }}"
+        state: present
+      vars:
+        vm2_packages:
+          - net-tools  # сетевые утилиты
+
