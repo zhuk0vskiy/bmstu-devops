@@ -60,7 +60,7 @@ https://github.com/prometheus/blackbox_exporter
 # Решения
 
 Тк будем ставить графану прям на ВМ2, то сразу сделаем роутинг, чтоб можно было с хоста зайти 
-1. Подключаемся к ВМ2 (рекомендую делать это с хоста по ssh)
+1. Подключаемся к ВМ1 (рекомендую делать это с хоста по ssh)
 1. `sudo iptables -t nat -A PREROUTING -p tcp --dport 3000 -j DNAT --to-destination <ip-адрес второй ВМ внутренней>:3000`
 2. `sudo netfilter-persistent save`
 
@@ -106,6 +106,7 @@ https://github.com/prometheus/blackbox_exporter
   1. `sudo systemctl daemon-reload`
   2. `sudo systemctl start node_exporter`
   3. `sudo systemctl enable node_exporter`
+  4. `sudo systemctl status node_exporter`
 
 - Проверка метрик
   1. `curl http://localhost:9100/metrics`
@@ -239,6 +240,8 @@ sudo systemctl restart prometheus -->
 
   смотрите на архитектуру(если мак, то надо arm)
 
+  1. `cd ~`
+
   1. `wget https://github.com/prometheus/prometheus/releases/download/v2.47.0/prometheus-2.47.0.linux-amd64.tar.gz`
 
 
@@ -271,7 +274,7 @@ sudo systemctl restart prometheus -->
             - targets: ["localhost:9090"]
         - job_name: "node_exporter"
           static_configs:
-            - targets: ["localhost:9100", "<ip ВМ2 внутренней сети>:9100"]   
+            - targets: ["localhost:9090", "<ip ВМ2 внутренней сети>:9090"]   
       ```
 
 
@@ -307,7 +310,7 @@ sudo systemctl restart prometheus -->
 
 
 - Проверка работы
-  1. с хоста в браузере `http://<ваш_IP_сервера>:9090`
+  1. с хоста в браузере `http://IP_ВМ1>:9090`
 
 2. Тут же чекаем что метрики папки и nginx собираются 
   `prometheus_dir_size_bytes`
@@ -376,7 +379,7 @@ sudo systemctl restart prometheus -->
           disableDeletion: false
           updateIntervalSeconds: 10
           options:
-              path: /var/lib/grafana/dashboards
+            path: /var/lib/grafana/dashboards
       ```
 
   3. `sudo mkdir -p /var/lib/grafana/dashboards`
@@ -490,6 +493,7 @@ sudo systemctl restart prometheus -->
 14. `sudo systemctl start alertmanager`
 15. `sudo systemctl enable alertmanager`
 16. `sudo systemctl status alertmanager`
+17. и рестартим prometheus `sudo systemctl restart prometheus`
 
 ### Настраиваем бота
 
