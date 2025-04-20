@@ -55,7 +55,7 @@ become_method;
 2. Прокидываем ssh ключи, чтоб вм могли взаимодействовать
     ```
     ssh-keygen
-    ssh-copy-id user@IP_ВМ2
+    ssh-copy-id юзер_на_вм2@IP_ВМ2
     ```
 
 2. Прописываем вм для работы
@@ -71,7 +71,7 @@ become_method;
   vm2 ansible_host=IP_ВМ2
 
   [all:vars]  # Общие переменные
-  ansible_user=user  # Пользователь для подключения
+  ansible_user=<юзер на вм2>  # Пользователь для подключения
   ansible_ssh_private_key_file=~/.ssh/id_ed25519  # Путь к SSH-ключу
 
   [all:children]
@@ -265,7 +265,7 @@ become_method;
 7. Выбрать любой готовый плейбук из репозитория Ansible Galaxy и
 продемонстрировать работу с ним. Уметь рассказать возможности
 данного плейбука.
-- `ansible-galaxy install geerlingguy.ntp`
+- `ansible-galaxy install geerlingguy.docker`
 - `nano install_docker.yml`
   ```
   - name: Install and configure Docker with log limits
